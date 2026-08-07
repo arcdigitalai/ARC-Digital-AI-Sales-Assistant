@@ -4,7 +4,7 @@ AI Sales Assistant — COMPLETE SINGLE FILE
 Everything in one file. Nothing can be missing.
 Render: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --preload
 Local:  python app.py
-Login:  admin@salesai.com / Admin@123456
+Login:  kevin@salesai.com / Adminkevin@123456
 """
 import os,json,csv,io,re,logging,threading,time,hashlib,base64,sqlite3,smtplib,tempfile
 import urllib.request,urllib.error,urllib.parse
