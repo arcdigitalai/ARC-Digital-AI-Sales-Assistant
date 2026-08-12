@@ -23,7 +23,7 @@ def client():
 
 @pytest.fixture(scope="session")
 def admin(client):
-    r = client.post("/api/auth/login", json={"email": "admin@salesai.com", "password": "Admin@123456"})
+    r = client.post("/api/auth/login", json={"email": "kevin@salesai.com", "password": "adminkevin@123456"})
     tok = r.get_json()["data"]["token"]
     return {"Authorization": "Bearer " + tok}
 

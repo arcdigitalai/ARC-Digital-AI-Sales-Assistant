@@ -797,6 +797,11 @@ th .sort-ind{font-size:.6rem;margin-left:3px}
 .qsec h4{font-size:.75rem;color:var(--accent);text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px}
 .checkline{display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--text);cursor:pointer;padding:3px 0}
 .checkline input{width:auto}
+/* Conditionally-required fields in the qualification form */
+.reqmark{font-size:.62rem;text-transform:none;letter-spacing:0;color:#64748b}
+.fg.req-on .reqmark{color:var(--warm);font-weight:700}
+.fg.req-on textarea{border-color:var(--warm);box-shadow:0 0 0 1px rgba(245,158,11,.35)}
+.fg.req-miss textarea{border-color:var(--red);box-shadow:0 0 0 2px rgba(239,68,68,.35)}
 </style>
 </head>
 <body>
@@ -806,8 +811,8 @@ th .sort-ind{font-size:.6rem;margin-left:3px}
   <div class="login-box">
     <h2>🤖 ARC Digital AI Sales Assistant</h2>
     <p>Groq AI · Twilio SMS · Bland AI · Google Calendar</p>
-    <div class="form-group"><label>Email</label><input id="li-email" type="email" value="admin@salesai.com"></div>
-    <div class="form-group"><label>Password</label><input id="li-pass" type="password" value="Admin@123456"></div>
+    <div class="form-group"><label>Email</label><input id="li-email" type="email" value="kevin@salesai.com"></div>
+    <div class="form-group"><label>Password</label><input id="li-pass" type="password" placeholder="Password"></div>
     <button id="login-btn" class="btn btn-primary btn-full" onclick="doLogin()">Login →</button>
     <div style="text-align:center;margin-top:12px;font-size:.8rem;color:var(--muted)">
       Don't have an account? <a href="#" onclick="showRegister()" style="color:var(--accent)">Register</a>
@@ -1358,7 +1363,11 @@ function lqwQualBadge(r) {
   if (r.qual_result === 'unqualified') return '<span class="badge badge-unqualified">unqualified</span>';
   if (r.qual_result === 'nurture') return '<span class="badge badge-nurture">nurture</span>';
   if (r.qual_result === 'more_info') return '<span class="badge pill-warn">more info</span>';
-  if (r.status === 'qualified' || r.status === 'opportunity') return '<span class="badge badge-qualified">qualified</span>';
+  // No human decision on file. A 'qualified'/'opportunity' STATUS can arrive
+  // from an import or the Jakes sync — label it honestly as unreviewed rather
+  // than implying somebody qualified it.
+  if (r.status === 'qualified' || r.status === 'opportunity')
+    return '<span class="badge badge-cold" title="Status came from an import or sync — no human qualification decision has been recorded yet. Open the lead → Qualification to review.">auto · unreviewed</span>';
   return '<span style="color:var(--muted);font-size:.75rem">—</span>';
 }
 function lqwScoreCell(r) {
@@ -1822,7 +1831,11 @@ function lqImpGroupHTML(g, gi) {
    under tables that fully fit. Hide overflow when there is nothing real to
    scroll; re-enable it the moment the table genuinely overflows. */
 function lqFixScrollbars() {
-  document.querySelectorAll('.lqi-scroll').forEach(el => {
+  // Covers both table-wrapper generations (.lqi-scroll = imported leads,
+  // .lqw-scroll = CRM workspace/clients/activities/etc.). At 125% Windows
+  // scaling Chrome reports scrollWidth 1-2px over clientWidth and paints a
+  // useless scrollbar — hide it unless there is genuine overflow.
+  document.querySelectorAll('.lqi-scroll, .lqw-scroll').forEach(el => {
     el.style.overflowX = (el.scrollWidth - el.clientWidth) > 2 ? 'auto' : 'hidden';
   });
 }
@@ -3740,7 +3753,7 @@ function status_dot(ok,lbl){
 /* ════════════════════════════════════════════════════════════
    UTILITIES
 ════════════════════════════════════════════════════════════ */
-function set(id,html){ const el=document.getElementById(id); if(el) el.innerHTML=html; }
+function set(id,html){ const el=document.getElementById(id); if(el){ el.innerHTML=html; requestAnimationFrame(lqFixScrollbars); } }
 function v(id){ const el=document.getElementById(id); return el?(el.value||''):''; }
 function s(id,val){ const el=document.getElementById(id); if(el) el.value=val; }
 function esc(s){ if(!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -4530,6 +4543,7 @@ async function quotations() {
           ${QUOTE_STATUSES.map(s=>`<option value="${s}" ${q.status===s?'selected':''}>${s.replace('_',' ')}</option>`).join('')}
         </select>
         <button class="btn btn-sm btn-primary" onclick="viewQuoteHTML(${q.id},'professional')">👁 View</button>
+        <button class="btn btn-sm btn-success" onclick="quoteSend(${q.id})" title="Email the branded quotation to the client via your Gmail">✉️ Send</button>
         <button class="btn btn-sm btn-ghost" onclick="printQuote(${q.id})">🖨 Print / PDF</button>
         <button class="btn btn-sm btn-ghost" onclick="quoteNewVersion(${q.id},${q.amount||0})" title="Supersede this and start v${(q.version||1)+1}">🔁 New version</button>
         ${['approved','accepted'].includes(q.status)?`<button class="btn btn-sm btn-ghost" style="color:#3b82f6" onclick="convertToInvoice(${q.id})">🧾 Convert to Invoice</button>`:''}
@@ -4541,6 +4555,15 @@ async function quoteSetStatus(id, sel) {
   const r = await api('POST',`/quotations/${id}/status`,{ status: sel.value });
   if (r) toast(`✅ Quotation → ${sel.value.replace('_',' ')}`,'success');
   quotations();   // server truth either way
+}
+async function quoteSend(id) {
+  const rows = await api('GET','/quotations'); if (!rows) return;
+  const qt = rows.find(x=>x.id===id) || {};
+  const to = prompt('Send quotation to (email):', qt.contact_name && qt.contact_name.trim() ? '' : '');
+  if (to === null) return;
+  if (!confirm(`Email quotation ${qt.quote_number||''} to ${to||'the primary contact'}?\n\nIt sends the branded HTML quote from your own Gmail.`)) return;
+  const r = await api('POST',`/quotations/${id}/send`, to ? { to } : {});
+  if (r) { toast('✅ '+r.message,'success'); quotations(); }
 }
 async function quoteNewVersion(id, amount) {
   const amt = prompt('Amount for the new version (ex GST, AUD):', amount);
@@ -4738,7 +4761,12 @@ const LSO_TABS = [['overview','Overview'],['qualification','Qualification'],['co
 
 function lsoRender() {
   const d = LSO.data, co = d.company, sc = d.score;
-  const eff = sc ? (sc.override_score != null ? sc.override_score : sc.total_score) : (co.lead_score||0);
+  // Use the SAME effective score the leads table and tier logic use
+  // (override > companies.lead_score > raw AI total) — showing total_score
+  // here made the panel disagree with the table.
+  const eff = sc ? (sc.effective_score != null ? sc.effective_score
+                    : (sc.override_score != null ? sc.override_score : sc.total_score))
+                 : (co.lead_score||0);
   set('lead-so-head', `
     <div style="display:flex;align-items:center;gap:12px;min-width:0">
       ${lqAvatar(co.name)}
@@ -4773,6 +4801,7 @@ function lsoRender() {
   const bodies = { overview: lsoOverview, qualification: lsoQualification, comms: lsoComms,
                    activities: lsoActivities, notes: lsoNotes, timeline: lsoTimeline };
   set('lead-so-body', tabbar + (bodies[LSO.tab]||lsoOverview)());
+  if (LSO.tab === 'qualification') lsoQualReqHint();
 }
 
 function lsoKV(label, val) { return `<div class="kv"><label>${label}</label><div>${val || '<span style="color:#475569">—</span>'}</div></div>`; }
@@ -4844,11 +4873,35 @@ function lsoOverview() {
         </div>
       </div>` : `<div class="empty">Not scored yet. <button class="btn btn-sm btn-primary" onclick="lsoRescore()">🤖 AI Score now</button></div>`}
     </div>
-    ${d.contacts.length>1?`<div class="section"><h3>All Contacts (${d.contacts.length})</h3>
-      ${d.contacts.map(ct=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(51,65,85,.4);font-size:.85rem">
-        <span><b>${esc((ct.first_name+' '+(ct.last_name||'')).trim())}</b> <span style="color:var(--muted)">${esc(ct.title||'')}</span></span>
-        <span style="color:var(--muted)">${esc(ct.email||ct.phone||'')} ${ct.is_decision_maker?'<span style="color:var(--green)">★</span>':''}</span>
-      </div>`).join('')}</div>`:''}`;
+    <div class="section"><h3>Contacts &amp; Buying Roles (${d.contacts.length})</h3>
+      ${d.contacts.length ? d.contacts.map(ct=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(51,65,85,.4);font-size:.85rem;flex-wrap:wrap">
+        <span><b>${esc((ct.first_name+' '+(ct.last_name||'')).trim())}</b> <span style="color:var(--muted)">${esc(ct.title||'')}</span>
+          ${(ct.buying_roles||[]).map(r=>`<span class="chip chip-accent" style="margin-left:4px">${esc(r.replace(/_/g,' '))}</span>`).join('')}
+          ${ct.is_decision_maker&&!(ct.buying_roles||[]).includes('decision_maker')?'<span class="chip chip-accent" style="margin-left:4px">decision maker</span>':''}</span>
+        <span style="display:flex;align-items:center;gap:8px">
+          <span style="color:var(--muted)">${esc(ct.email||ct.phone||'')}</span>
+          <button class="btn btn-sm btn-ghost" title="Edit buying roles" onclick="rolesModal(${ct.id},'${esc((ct.first_name+' '+(ct.last_name||'')).trim())}')">🎭 Roles</button>
+        </span>
+      </div>`).join('') : '<div class="empty" style="padding:10px">No contacts yet.</div>'}</div>`;
+}
+
+const AI_REC_LABEL = { qualified:'qualified', unqualified:'unqualified', more_info:'more info needed',
+  not_applicable:'not applicable (consumer enquiry)' };
+const BUYING_ROLES = [['decision_maker','Decision maker'],['champion','Champion'],['technical','Technical stakeholder'],
+  ['financial_approver','Financial approver'],['procurement','Procurement contact'],['end_user','End user'],
+  ['influencer','Influencer'],['blocker','Blocker']];
+function rolesModal(ctId, name) {
+  const ct = (LSO.data.contacts||[]).find(c=>c.id===ctId) || {};
+  const have = ct.buying_roles || [];
+  modal(`<h3>🎭 Buying Roles — ${esc(name)}</h3>
+    <p style="font-size:.75rem;color:var(--muted);margin-bottom:10px">These feed the Decision Makers card and the opportunity warnings.</p>
+    ${BUYING_ROLES.map(([k,l])=>`<label class="checkline"><input type="checkbox" id="br-${k}" ${have.includes(k)||(k==='decision_maker'&&ct.is_decision_maker)?'checked':''}> ${l}</label>`).join('')}
+    <button class="btn btn-primary btn-full" style="margin-top:12px" onclick="rolesSave(${ctId})">💾 Save Roles</button>`,'Buying Roles');
+}
+async function rolesSave(ctId) {
+  const roles = BUYING_ROLES.filter(([k])=>document.getElementById('br-'+k).checked).map(([k])=>k);
+  const r = await api('POST',`/contacts/${ctId}/buying-roles`,{ roles });
+  if (r) { closeModal(); toast('✅ Buying roles saved','success'); lsoReload(); }
 }
 
 async function lsoSaveCrmFields() {
@@ -4889,11 +4942,27 @@ function lsoQualification() {
   const inp = (id, lbl, val, ph) => `<div class="fg"><label>${lbl}</label><input id="${id}" value="${esc(val||'')}" placeholder="${ph||''}"></div>`;
   const ta  = (id, lbl, val, ph) => `<div class="fg full"><label>${lbl}</label><textarea id="${id}" rows="2" placeholder="${ph||''}">${esc(val||'')}</textarea></div>`;
   return `
-    ${qd.ai_recommendation?`<div class="qsec" style="border-color:rgba(59,130,246,.5)"><h4>🤖 AI Recommendation</h4>
-      <div style="font-size:.9rem"><b>${esc(qd.ai_recommendation)}</b> <span class="chip">confidence/risk: ${esc(qd.ai_confidence||'—')}</span></div>
-      <div style="font-size:.8rem;color:var(--muted);margin-top:4px">${esc(qd.ai_reasoning||'')}</div>
-      <div style="font-size:.72rem;color:var(--warm);margin-top:6px">AI recommends — a human confirms below. The result is never set from the score alone.</div>
-    </div>`:`<div class="qsec"><h4>🤖 AI Recommendation</h4><button class="btn btn-sm btn-primary" onclick="lsoQualAI()">Get AI recommendation</button></div>`}
+    <div class="qsec" style="border-color:rgba(59,130,246,.5)">
+      <h4>🤖 AI Recommendation
+        <span style="float:right;font-weight:400;text-transform:none;letter-spacing:0">
+          <button class="btn btn-sm btn-primary" onclick="lsoQualAI()">${qd.ai_recommendation?'🔄 Re-run AI':'Get AI recommendation'}</button>
+        </span></h4>
+      ${qd.ai_recommendation ? `
+        <div style="font-size:.9rem"><b style="${qd.ai_recommendation==='not_applicable'?'color:var(--muted)':''}">${esc(AI_REC_LABEL[qd.ai_recommendation]||qd.ai_recommendation)}</b>
+          <span class="chip">confidence/risk: ${esc(qd.ai_confidence||'—')}</span>
+          ${qd.ai_recommended_at?`<span class="chip" title="AI recommendations are a point-in-time snapshot — re-run after you update the lead's details">generated ${fmtDt(qd.ai_recommended_at)}</span>`:''}
+        </div>
+        <div style="font-size:.8rem;color:var(--muted);margin-top:4px">${esc(qd.ai_reasoning||'')}</div>
+        ${qd.result
+          ? `<div style="font-size:.78rem;margin-top:8px;padding:7px 10px;background:rgba(59,130,246,.09);border-radius:6px">
+               🤖 AI recommended <b>${esc(AI_REC_LABEL[qd.ai_recommendation]||qd.ai_recommendation)}</b> → 👤 you decided <b style="color:${qd.result==='qualified'?'var(--green)':qd.result==='unqualified'?'var(--red)':'var(--warm)'}">${esc(qd.result.replace('_',' '))}</b>
+               ${qd.qualified_at?` <span style="color:var(--muted)">on ${fmtDt(qd.qualified_at)}</span>`:''}
+               ${qd.ai_recommendation==='not_applicable' ? ' <span class="chip">your call — AI had no opinion</span>'
+                 : qd.result!==qd.ai_recommendation?' <span class="chip pill-warn">human override</span>':' <span class="chip pill-ok">agrees</span>'}
+             </div>`
+          : `<div style="font-size:.72rem;color:var(--warm);margin-top:6px">AI recommends — a human confirms below. <b>No human decision recorded yet.</b> The AI value never changes on its own: it only updates when you press 🔄 Re-run AI.</div>`}
+      ` : `<div style="font-size:.8rem;color:var(--muted)">No AI recommendation yet — press the button to generate one.</div>`}
+    </div>
     <div class="qsec"><h4>Fit</h4><div class="lqi-form">
       <div class="fg">${chk('q-fit-ind','Correct industry', qd.fit_industry)}</div>
       <div class="fg">${chk('q-fit-geo','Correct geography', qd.fit_geography)}</div>
@@ -4927,12 +4996,14 @@ function lsoQualification() {
     </div></div>
     <div class="qsec"><h4>Qualification result (human decision)</h4>
       <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px">
-        ${['qualified','unqualified','more_info','nurture'].map(x=>`<label class="checkline"><input type="radio" name="q-result" value="${x}" ${qd.result===x?'checked':''}> ${x.replace('_',' ')}</label>`).join('')}
+        ${['qualified','unqualified','more_info','nurture'].map(x=>`<label class="checkline"><input type="radio" name="q-result" value="${x}" ${qd.result===x?'checked':''} onchange="lsoQualReqHint()"> ${x.replace('_',' ')}</label>`).join('')}
       </div>
       <div class="lqi-form">
         ${ta('q-reason','Qualification reason', qd.result_reason)}
-        ${ta('q-unq-reason','Unqualification reason (required if Unqualified)', qd.unqualified_reason)}
-        ${ta('q-human','Human decision note (required for Qualified)', qd.human_decision,'e.g. Confirmed on discovery call 4 Aug — clear need + budget')}
+        <div class="fg full" id="fg-unq"><label>Unqualification reason <span class="reqmark">— required when Unqualified</span></label>
+          <textarea id="q-unq-reason" rows="2" placeholder="e.g. Outside our service area">${esc(qd.unqualified_reason||'')}</textarea></div>
+        <div class="fg full" id="fg-human"><label>Human decision note <span class="reqmark">— required when Qualified</span></label>
+          <textarea id="q-human" rows="2" placeholder="e.g. Confirmed on discovery call 4 Aug — clear need + budget">${esc(qd.human_decision||'')}</textarea></div>
         ${ta('q-notes','Qualification notes', qd.human_notes)}
       </div>
       ${qd.qualified_at?`<div style="font-size:.72rem;color:var(--muted);margin-top:6px">Last decided ${fmtDt(qd.qualified_at)}</div>`:''}
@@ -4944,9 +5015,32 @@ async function lsoQualAI() {
   const r = await api('POST','/leads/'+LSO.cid+'/qualification/ai-recommend');
   if (r) { toast(`🤖 AI suggests: ${r.qualify_score}/10 — ${esc(r.reason||'')}`,'info'); lsoReload('qualification'); }
 }
+/* Highlight whichever note field the chosen result makes mandatory, so the
+   requirement is visible BEFORE the user presses Save. */
+function lsoQualReqHint() {
+  const sel = (document.querySelector('input[name="q-result"]:checked') || {}).value;
+  const h = document.getElementById('fg-human'), u = document.getElementById('fg-unq');
+  if (h) { h.classList.toggle('req-on', sel === 'qualified'); if (sel !== 'qualified') h.classList.remove('req-miss'); }
+  if (u) { u.classList.toggle('req-on', sel === 'unqualified'); if (sel !== 'unqualified') u.classList.remove('req-miss'); }
+}
+function lsoQualFlagMissing(wrapId, fieldId, msg) {
+  const w = document.getElementById(wrapId), f = document.getElementById(fieldId);
+  if (w) w.classList.add('req-miss');
+  if (f) { f.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => f.focus(), 300); }
+  toast(msg, 'error');
+}
+
 async function lsoQualSave() {
   const g_ = id => { const el = document.getElementById(id); return el ? el.checked : false; };
   const resEl = document.querySelector('input[name="q-result"]:checked');
+  // Validate here so the user is shown the exact field instead of bouncing
+  // off a server error after the fact.
+  if (resEl && resEl.value === 'qualified' && !v('q-human').trim())
+    return lsoQualFlagMissing('fg-human','q-human',
+      '✏️ Add a "Human decision note" — a lead can only be marked Qualified by a person, never by the AI score alone.');
+  if (resEl && resEl.value === 'unqualified' && !v('q-unq-reason').trim())
+    return lsoQualFlagMissing('fg-unq','q-unq-reason',
+      '✏️ Add an "Unqualification reason" before marking this lead Unqualified.');
   const body = {
     fit_industry: g_('q-fit-ind')?1:0, fit_geography: g_('q-fit-geo')?1:0,
     fit_company_size: v('q-fit-size'), fit_business_type: v('q-fit-type'), fit_service_interest: v('q-fit-svc'),
