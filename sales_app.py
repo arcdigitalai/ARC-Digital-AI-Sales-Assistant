@@ -266,10 +266,10 @@ def init_db():
     _seed_db()
 
 def _seed_db():
-    if q1("SELECT 1 FROM users WHERE email='admin@salesai.com'"): return
+    if q1("SELECT 1 FROM users WHERE email='kevin@salesai.com'"): return
     pw=hashlib.sha256(("Admin@123456"+SECRET_KEY).encode()).hexdigest()
     aid=run("INSERT INTO users(email,full_name,password,role) VALUES(?,?,?,?)",
-            ("admin@salesai.com","System Admin",pw,"admin"))
+            ("kevin@salesai.com","System Admin",pw,"admin"))
     demos=[
         ("Stripe","FinTech",4000,7500000000,"stripe.com","San Francisco","USA",91,"opportunity",'["Python","Go"]'),
         ("Notion","SaaS",400,300000000,"notion.so","San Francisco","USA",78,"qualified",'["TypeScript"]'),
